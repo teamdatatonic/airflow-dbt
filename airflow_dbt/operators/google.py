@@ -1,11 +1,57 @@
+from airflow.models import BaseOperatorLink, XCom
+from airflow.plugins_manager import AirflowPlugin
 from airflow.utils.decorators import apply_defaults
 
 from airflow_dbt.hooks.google import DbtCloudBuildHook
 from airflow_dbt.operators.dbt_operator import DbtBaseOperator
 
+XCOM_KEY_CLOUD_BUILD_LINK = 'cloud_build_link'
+XCOM_KEY_DBT_ARTIFACT_LINK = 'dbt_artifact_link'
+XCOM_KEY_BUILD_ID = 'build_id'
+
+
+class CloudBuildConsoleLink(BaseOperatorLink):
+    """Helper class for constructing BigQuery link."""
+
+    name = 'CloudBuild'
+
+    def get_link(self, operator, dttm):
+        cloud_build_link = XCom.get_one(
+            dag_id=operator.dag.dag_id,
+            task_id=operator.task_id,
+            execution_date=dttm,
+            key=XCOM_KEY_CLOUD_BUILD_LINK,
+        )
+        return cloud_build_link
+
+class DbtArtifactsConsoleLink(BaseOperatorLink):
+    """Helper class for constructing BigQuery link."""
+
+    name = 'DBT Artifacts'
+
+    def get_link(self, operator, dttm):
+        cloud_build_link = XCom.get_one(
+            dag_id=operator.dag.dag_id,
+            task_id=operator.task_id,
+            execution_date=dttm,
+            key=XCOM_KEY_DBT_ARTIFACT_LINK,
+        )
+        return cloud_build_link
+
+
+class AirflowDbtCloudBuildLinksPlugin(AirflowPlugin):
+    """Airflow plugin for CloudBuild links"""
+    name = "cloud_build_link_plugin"
+    operator_extra_links = [
+        CloudBuildConsoleLink(),
+        DbtArtifactsConsoleLink(),
+    ]
+
 
 class DbtCloudBuildOperator(DbtBaseOperator):
     """Uses the CloudBuild Hook to run the provided dbt config"""
+
+    operator_extra_links = (CloudBuildConsoleLink(), DbtArtifactsConsoleLink())
 
     template_fields = DbtBaseOperator.template_fields + [
         'gcs_staging_location', 'project_id', 'dbt_version',
@@ -38,6 +84,23 @@ class DbtCloudBuildOperator(DbtBaseOperator):
             *args,
             **kwargs
         )
+
+    def execute(self, context):
+        # execute the super function normally
+        build_id = super(DbtCloudBuildOperator, self).execute(context)
+        # use the returned value to create several XCom values
+        project_id = self.dbt_hook.cloud_build_hook.project_id
+        artifacts_path = self.dbt_artifacts_dest.lstrip('gs://')
+        artifacts_url = f'https://console.cloud.google.com/storage/browser/{artifacts_path}?project={project_id}'
+        build_url = f'https://console.cloud.google.com/cloud-build/builds/{build_id}?project={project_id}'
+        # push the values to the class context
+        self.artifacts_url = artifacts_url
+        self.build_url = build_url
+        # push the xcoms
+        self.xcom_push(context, key=XCOM_KEY_DBT_ARTIFACT_LINK, value=artifacts_url)
+        self.xcom_push(context, key=XCOM_KEY_CLOUD_BUILD_LINK, value=build_url)
+        self.xcom_push(context, key=XCOM_KEY_BUILD_ID, value=build_id)
+        return build_id
 
     def instantiate_hook(self):
         """
