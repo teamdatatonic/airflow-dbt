@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from airflow.models import BaseOperator
 # noinspection PyDeprecation
+from airflow.models.taskinstance import Context
 from airflow.utils.decorators import apply_defaults
 
 from airflow_dbt.dbt_command_config import DbtCommandConfig
@@ -277,7 +278,7 @@ class DbtBaseOperator(BaseOperator):
             env=self.dbt_env,
         )
 
-    def execute(self, context: Any):
+    def execute(self, context: Context):
         """Runs the provided command in the provided execution environment"""
         self.instantiate_hook()
         dbt_base_params = [
@@ -297,13 +298,16 @@ class DbtBaseOperator(BaseOperator):
             if key not in dbt_base_params
         }
 
-        self.dbt_cli_command = generate_dbt_cli_command(
+        dbt_cli_command = generate_dbt_cli_command(
             dbt_bin=self.dbt_bin,
             command=self.dbt_command,
             base_config=dbt_base_config,
             command_config=dbt_command_config,
         )
-        self.dbt_hook.run_dbt(self.dbt_cli_command)
+
+        self.xcom_push(context, key='dbt_command', value=dbt_cli_command)
+
+        return self.dbt_hook.run_dbt(dbt_cli_command)
 
 
 class DbtRunOperator(DbtBaseOperator):

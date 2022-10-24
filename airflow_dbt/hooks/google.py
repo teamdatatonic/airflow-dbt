@@ -148,7 +148,7 @@ class DbtCloudBuildHook(DbtBaseHook):
             f'Running the following cloud build'
             f' config:\n{dump(cloud_build_config)}'
         )
-
+        build_id = None
         try:
             # cloud_build_client = self.get_conn()
             self.log.info("Creating build")
@@ -162,6 +162,7 @@ class DbtCloudBuildHook(DbtBaseHook):
                 f'{result_build.id}.txt'
             )
             self.build_id = result_build.id
+
             # print logs from GCS
             with GCSHook().provide_file(
                 bucket_name=result_build.logs_bucket,
@@ -179,10 +180,13 @@ class DbtCloudBuildHook(DbtBaseHook):
                     f'{log_block}\n'
                     f'{hr}'
                 )
-            return result_build
         except Exception as ex:
             traceback.print_exc()
             raise AirflowException("Exception running the build: ", str(ex))
+        finally:
+            # even if build fails always try to return its build id
+            return build_id
+
 
     def on_kill(self):
         """Stopping the build is not implemented until google providers v6"""
