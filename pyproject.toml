@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "airflow-dbt-dinigo"
+name = "airflow-dbt-dt"
 dynamic = ["version"]
 description = "Apache Airflow integration for dbt"
 readme = "README.md"
